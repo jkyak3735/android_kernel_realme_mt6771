@@ -42,10 +42,8 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-none-linux-gnu-
-          sed -i '/^CONFIG_CC_WERROR=/s/.*/# CONFIG_CC_WERROR is not set/' .config
-          find . \( -name 'Makefile' -o -name '*.mk' -o -name 'Kbuild' \) -exec grep -l '\-Werror' {} \; 2>/dev/null | while read f; do
-            sed -i 's/-Werror[^ ]*//g' "$f"
-          done
+          sed -i 's/^CONFIG_CC_WERROR=y$/# CONFIG_CC_WERROR is not set/' .config
+          sed -i 's/ -Werror / /g; s/ -Werror$//g' Makefile
           make olddefconfig
 
       - name: Build kernel
