@@ -25,7 +25,9 @@ jobs:
       - name: Setup toolchain
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python2 gcc-aarch64-linux-gnu
+          sudo apt-get install -y -qq python2 gcc-10-aarch64-linux-gnu g++-10-aarch64-linux-gnu
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-linux-gnu-gcc
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-10 /usr/bin/aarch64-linux-gnu-g++
 
       - name: Configure kernel
         run: |
@@ -37,7 +39,6 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          sed -i 's/ -Werror\(=\S*\)\? / /g; s/ -Werror\(=\S*\)\?$//g' Makefile
           make -j$(nproc) Image.gz-dtb
         timeout-minutes: 60
 
