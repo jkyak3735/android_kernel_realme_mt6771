@@ -29,7 +29,9 @@ jobs:
           curl -L -o gcc.tar.xz \
             https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/arm64/10.3.0/arm64-gcc-10.3.0-nolibc-aarch64-linux.tar.xz
           tar -xf gcc.tar.xz
-          echo "$PWD/arm64-gcc-10.3.0-nolibc-aarch64-linux/bin" >> $GITHUB_PATH
+          GCC_BIN=$(dirname $(find . -name 'aarch64-linux-gcc' -type f 2>/dev/null | head -1))
+          echo "Toolchain found at: $GCC_BIN"
+          echo "$GCC_BIN" >> $GITHUB_PATH
 
       - name: Configure kernel
         run: |
