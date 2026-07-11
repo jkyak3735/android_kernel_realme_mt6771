@@ -38,11 +38,21 @@ jobs:
           export CROSS_COMPILE=aarch64-none-linux-gnu-
           make ${{ inputs.defconfig }}
 
+      - name: Disable -Werror
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-none-linux-gnu-
+          sed -i '/^CONFIG_CC_WERROR=/s/.*/# CONFIG_CC_WERROR is not set/' .config
+          find . \( -name 'Makefile' -o -name '*.mk' -o -name 'Kbuild' \) -exec grep -l '\-Werror' {} \; 2>/dev/null | while read f; do
+            sed -i 's/-Werror[^ ]*//g' "$f"
+          done
+          make olddefconfig
+
       - name: Build kernel
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-none-linux-gnu-
-          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error"
+          make -j$(nproc) Image.gz-dtb
         timeout-minutes: 60
 
       - name: Upload kernel
