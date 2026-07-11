@@ -37,7 +37,8 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error"
+          sed -i 's/ -Werror\(=\S*\)\? / /g; s/ -Werror\(=\S*\)\?$//g' Makefile
+          make -j$(nproc) Image.gz-dtb
         timeout-minutes: 60
 
       - name: Upload kernel
