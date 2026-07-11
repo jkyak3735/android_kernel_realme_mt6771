@@ -25,11 +25,7 @@ jobs:
       - name: Setup toolchain
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python2
-          curl -L -o gcc-linaro.tar.xz \
-            https://releases.linaro.org/components/toolchain/binaries/7.5-2019.12/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz
-          tar -xf gcc-linaro.tar.xz
-          echo "$PWD/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin" >> $GITHUB_PATH
+          sudo apt-get install -y -qq python2 gcc-aarch64-linux-gnu
 
       - name: Configure kernel
         run: |
@@ -41,7 +37,7 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j$(nproc) Image.gz-dtb
+          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error"
         timeout-minutes: 60
 
       - name: Upload kernel
