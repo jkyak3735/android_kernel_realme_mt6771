@@ -25,20 +25,22 @@ jobs:
       - name: Setup toolchain
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq python2 gcc-10-aarch64-linux-gnu g++-10-aarch64-linux-gnu
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-gcc-10 /usr/bin/aarch64-linux-gnu-gcc
-          sudo ln -sf /usr/bin/aarch64-linux-gnu-g++-10 /usr/bin/aarch64-linux-gnu-g++
+          sudo apt-get install -y -qq python2
+          curl -L -o gcc.tar.xz \
+            https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/arm64/10.3.0/arm64-gcc-10.3.0-nolibc-aarch64-linux.tar.xz
+          tar -xf gcc.tar.xz
+          echo "$PWD/arm64-gcc-10.3.0-nolibc-aarch64-linux/bin" >> $GITHUB_PATH
 
       - name: Configure kernel
         run: |
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-
           make ${{ inputs.defconfig }}
 
       - name: Build kernel
         run: |
           export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-
           make -j$(nproc) Image.gz-dtb
         timeout-minutes: 60
 
