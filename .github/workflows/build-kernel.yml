@@ -1,0 +1,54 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig to use'
+        required: true
+        default: 'CPH1859_defconfig'
+        type: choice
+        options:
+          - CPH1859_defconfig
+          - RMX1831_defconfig
+          - defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply ION compatibility patch
+        run: patch -p1 < 0001-ion-handle-android14-ioctl-compat.patch
+
+      - name: Setup toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python2
+          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
+          curl -L -o ndk.zip https://dl.google.com/android/repository/android-ndk-r27-linux.zip
+          unzip -q ndk.zip
+          echo "$PWD/android-ndk-r27/toolchains/llvm/prebuilt/linux-x86_64/bin" >> $GITHUB_PATH
+
+      - name: Configure kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CC=aarch64-linux-android21-clang
+          make ${{ inputs.defconfig }}
+
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CC=aarch64-linux-android21-clang
+          export CROSS_COMPILE_COMPAT=armv7a-linux-androideabi16-
+          make -j$(nproc) Image.gz-dtb
+        timeout-minutes: 60
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ inputs.defconfig }}
+          path: arch/arm64/boot/Image.gz-dtb
