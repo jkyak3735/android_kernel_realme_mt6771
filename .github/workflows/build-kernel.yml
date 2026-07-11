@@ -1,0 +1,47 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      defconfig:
+        description: 'Defconfig to use'
+        required: true
+        default: 'CPH1859_defconfig'
+        type: choice
+        options:
+          - CPH1859_defconfig
+          - RMX1831_defconfig
+          - defconfig
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply ION compatibility patch
+        run: patch -p1 < 0001-ion-handle-android14-ioctl-compat.patch
+
+      - name: Setup toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python2 gcc-aarch64-linux-gnu
+
+      - name: Configure kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make ${{ inputs.defconfig }}
+
+      - name: Build kernel
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make -j$(nproc) Image.gz-dtb
+        timeout-minutes: 60
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ inputs.defconfig }}
+          path: arch/arm64/boot/Image.gz-dtb
