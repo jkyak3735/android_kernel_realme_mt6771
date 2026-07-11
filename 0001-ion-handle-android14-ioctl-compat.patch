@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kernel-builder <nobody@localhost>
+Date: Sat, 11 Jul 2026 00:00:00 +0800
+Subject: [PATCH] ion: handle Android 14+ ION_IOC_ALLOC/FREE struct changes
+
+Android 14 changed struct ion_allocation_data to 24 bytes (align is
+__u32 instead of size_t, handle replaced by fd).  The ION_IOC_ALLOC
+cmd value therefore has _IOC_SIZE=24, but this kernel's
+sizeof(ion_allocation_data)=32, so switch(cmd) never matches
+ION_IOC_ALLOC, returning -ENOTTY.  Userspace cleanup then calls
+ION_IOC_FREE with handle=0, which also errors.
+
+Fix both:
+- When ALLOC's _IOC_NR matches but size doesn't, extract common
+  leading fields and return a dmabuf fd at offset 20 (new struct's
+  fd), freeing the ION handle afterwards.
+- When FREE gets handle=0, silently return 0.
+
+Change-Id: I0000000000000000000000000000000000000001
+Signed-off-by: kernel-builder <nobody@localhost>
+---
+ drivers/staging/android/ion/ion.c | 99 +++++++++++++++++++++++++------
+ 1 file changed, 79 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/staging/android/ion/ion.c b/drivers/staging/android/ion/ion.c
+index 7f3f95e..d2e9b1c 100644
+--- a/drivers/staging/android/ion/ion.c
++++ b/drivers/staging/android/ion/ion.c
+@@ -103,18 +103,16 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ {
+ 	struct ion_client *client = filp->private_data;
+ 	struct ion_device *dev = client->dev;
+-	struct ion_handle *cleanup_handle = NULL;
++	struct ion_handle *cleanup_handle = NULL, *handle = NULL;
+ 	int ret = 0;
+ 	unsigned int dir;
++	unsigned int alloc_cmd_size = _IOC_SIZE(cmd);
+ 
+ 	union {
+ 		struct ion_fd_data fd;
+ 		struct ion_allocation_data allocation;
+ 		struct ion_handle_data handle;
+ 		struct ion_custom_data custom;
+-	} data;
+-
+-	dir = ion_ioctl_dir(cmd);
++	} data = {0};
+ 
+ 	/*
+ 	 * Android 14 changed struct ion_allocation_data:
+@@ -125,19 +123,77 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+ 	 *   unsigned int flags;    // offset 16, 4B (was 20)
+ 	 *   unsigned int handle;   // offset 20, 4B (was 24, now fd)
+ 	 * Total: 24 bytes. This kernel expects 32 bytes.
++	 * When _IOC_NR matches but size doesn't, parse the new format.
+ 	 */
+-	if (_IOC_SIZE(cmd) > sizeof(data)) {
++	if ((_IOC_NR(cmd) == _IOC_NR(ION_IOC_ALLOC) ||
++	     _IOC_NR(cmd) == 0) &&
++	    alloc_cmd_size != sizeof(struct ion_allocation_data)) {
++		__u8 small[24];
++		int new_fd;
++
++		memset(&data, 0, sizeof(data));
++		if (copy_from_user(&small, (void __user *)arg,
++				   min_t(unsigned int, alloc_cmd_size,
++					 (unsigned int)sizeof(small))))
++			return -EFAULT;
++
++		memcpy(&data.allocation.len, &small[0], sizeof(__u64));
++		memcpy(&data.allocation.align, &small[8], sizeof(__u32));
++		memcpy(&data.allocation.heap_id_mask, &small[12],
++		       sizeof(__u32));
++		memcpy(&data.allocation.flags, &small[16], sizeof(__u32));
++
++		if (!data.allocation.align)
++			data.allocation.align = PAGE_SIZE;
++		if (!data.allocation.len)
++			data.allocation.len = PAGE_SIZE;
++		if (!data.allocation.heap_id_mask)
++			data.allocation.heap_id_mask = ION_HEAP_SYSTEM_MASK;
++
++		handle = ion_alloc(client, data.allocation.len,
++				   data.allocation.align,
++				   data.allocation.heap_id_mask,
++				   data.allocation.flags);
++		if (IS_ERR(handle))
++			return PTR_ERR(handle);
++
++		new_fd = ion_share_dma_buf_fd(client, handle);
++		if (new_fd < 0) {
++			ion_free(client, handle);
++			return new_fd;
++		}
++		ion_free(client, handle);
++
++		/* Return fd at offset 20 (flags position) for new struct */
++		data.allocation.flags = new_fd;
++		if (copy_to_user((void __user *)arg, &data,
++				 alloc_cmd_size))
++			return -EFAULT;
++		return 0;
++	}
++
++	dir = ion_ioctl_dir(cmd);
++
++	if (alloc_cmd_size > sizeof(data)) {
+ 		IONMSG("ion_ioctl cmd = %d, _IOC_SIZE(cmd) = %d, sizeof(data) = %zd.\n",
+-				cmd, _IOC_SIZE(cmd), sizeof(data));
++		       cmd, alloc_cmd_size, sizeof(data));
+ 		return -EINVAL;
+ 	}
+ 
+ 	if (dir & _IOC_WRITE) {
+-		if (copy_from_user(&data, (void __user *)arg, _IOC_SIZE(cmd))) {
+-			IONMSG("ion_ioctl copy_from_user fail!. cmd = %d, n = %d.\n", cmd, _IOC_SIZE(cmd));
++		if (copy_from_user(&data, (void __user *)arg,
++				   alloc_cmd_size)) {
++			IONMSG("ion_ioctl copy_from_user fail!. cmd = %d, n = %d.\n",
++			       cmd, alloc_cmd_size);
+ 			return -EFAULT;
+ 		}
+ 	}
+ 
++	/*
++	 * Android 14 may pass ION_IOC_FREE with handle=0 as cleanup
++	 * after a failed allocation.  Silently ignore.
++	 */
++	if (cmd == ION_IOC_FREE && data.handle.handle == 0)
++		return 0;
++
+ 	switch (cmd) {
+ 	case ION_IOC_ALLOC:
+ 	{
+-- 
+2.34.1
