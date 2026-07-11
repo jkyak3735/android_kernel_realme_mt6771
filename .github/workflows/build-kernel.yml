@@ -42,7 +42,7 @@ jobs:
         run: |
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-none-linux-gnu-
-          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error=address-of-packed-member"
+          make -j$(nproc) Image.gz-dtb KCFLAGS="-Wno-error"
         timeout-minutes: 60
 
       - name: Upload kernel
