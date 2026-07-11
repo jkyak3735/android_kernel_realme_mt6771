@@ -5,28 +5,23 @@ Subject: [PATCH] ion: handle Android 14+ ION_IOC_ALLOC/FREE struct changes
 
 Android 14 changed struct ion_allocation_data to 24 bytes (align is
 __u32 instead of size_t, handle replaced by fd).  The ION_IOC_ALLOC
-cmd value therefore has _IOC_SIZE=24, but this kernel's
-sizeof(ion_allocation_data)=32, so switch(cmd) never matches
-ION_IOC_ALLOC, returning -ENOTTY.  Userspace cleanup then calls
+cmd value has _IOC_SIZE=24 but kernel expects 32, so switch(cmd)
+never matches, returning -ENOTTY.  Userspace cleanup then calls
 ION_IOC_FREE with handle=0, which also errors.
 
 Fix both:
-- When ALLOC's _IOC_NR matches but size doesn't, extract common
-  leading fields and return a dmabuf fd at offset 20 (new struct's
-  fd), freeing the ION handle afterwards.
+- When ALLOC's _IOC_NR matches but size differs, extract fields
+  and return dmabuf fd at offset 20 (new struct's fd), freeing
+  the ION handle afterward.
 - When FREE gets handle=0, silently return 0.
 
-Change-Id: I0000000000000000000000000000000000000001
 Signed-off-by: kernel-builder <nobody@localhost>
 ---
- drivers/staging/android/ion/ion.c | 99 +++++++++++++++++++++++++------
- 1 file changed, 79 insertions(+), 20 deletions(-)
-
-diff --git a/drivers/staging/android/ion/ion.c b/drivers/staging/android/ion/ion.c
-index 7f3f95e..d2e9b1c 100644
 --- a/drivers/staging/android/ion/ion.c
 +++ b/drivers/staging/android/ion/ion.c
-@@ -103,18 +103,16 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+@@ -1450,36 +1450,92 @@
+ 
+ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
  {
  	struct ion_client *client = filp->private_data;
  	struct ion_device *dev = client->dev;
@@ -42,19 +37,15 @@ index 7f3f95e..d2e9b1c 100644
  		struct ion_handle_data handle;
  		struct ion_custom_data custom;
 -	} data;
--
--	dir = ion_ioctl_dir(cmd);
 +	} data = {0};
  
- 	/*
- 	 * Android 14 changed struct ion_allocation_data:
-@@ -125,19 +123,77 @@ static long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
- 	 *   unsigned int flags;    // offset 16, 4B (was 20)
- 	 *   unsigned int handle;   // offset 20, 4B (was 24, now fd)
- 	 * Total: 24 bytes. This kernel expects 32 bytes.
-+	 * When _IOC_NR matches but size doesn't, parse the new format.
- 	 */
+ 	dir = ion_ioctl_dir(cmd);
+ 
 -	if (_IOC_SIZE(cmd) > sizeof(data)) {
++	/*
++	 * Android 14 changed struct ion_allocation_data to 24 bytes.
++	 * Handle ALLOC with mismatched size (new format format).
++	 */
 +	if ((_IOC_NR(cmd) == _IOC_NR(ION_IOC_ALLOC) ||
 +	     _IOC_NR(cmd) == 0) &&
 +	    alloc_cmd_size != sizeof(struct ion_allocation_data)) {
@@ -94,15 +85,12 @@ index 7f3f95e..d2e9b1c 100644
 +		}
 +		ion_free(client, handle);
 +
-+		/* Return fd at offset 20 (flags position) for new struct */
 +		data.allocation.flags = new_fd;
 +		if (copy_to_user((void __user *)arg, &data,
 +				 alloc_cmd_size))
 +			return -EFAULT;
 +		return 0;
 +	}
-+
-+	dir = ion_ioctl_dir(cmd);
 +
 +	if (alloc_cmd_size > sizeof(data)) {
  		IONMSG("ion_ioctl cmd = %d, _IOC_SIZE(cmd) = %d, sizeof(data) = %zd.\n",
@@ -122,15 +110,12 @@ index 7f3f95e..d2e9b1c 100644
  		}
  	}
  
-+	/*
-+	 * Android 14 may pass ION_IOC_FREE with handle=0 as cleanup
-+	 * after a failed allocation.  Silently ignore.
-+	 */
++	/* ION_IOC_FREE with null handle: silent success */
 +	if (cmd == ION_IOC_FREE && data.handle.handle == 0)
 +		return 0;
-+
  	switch (cmd) {
  	case ION_IOC_ALLOC:
  	{
--- 
-2.34.1
+ 		struct ion_handle *handle;
+ 
+--
